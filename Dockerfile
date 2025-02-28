@@ -4,7 +4,7 @@ FROM python:3.10-slim
 RUN apt-get update && apt-get install -y \
     wget \
     ca-certificates \
-    lib32gcc1 \
+    lib32gcc-s1 \
     && rm -rf /var/lib/apt/lists/*
 
 # Install SteamCMD
