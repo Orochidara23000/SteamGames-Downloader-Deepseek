@@ -12,9 +12,8 @@ from platform import system
 STEAMCMD_DIR = os.path.join(os.getcwd(), "steamcmd")
 STEAMCMD_EXE = os.path.join(STEAMCMD_DIR, "steamcmd.exe" if system() == "Windows" else "steamcmd.sh")
 LOG_FILE = "logs/app.log"
-PUBLIC_URL_BASE = os.getenv("PUBLIC_URL_BASE", "http://localhost:8080/downloads")
 
-# Ensure download directory exists
+# Ensure directories exist
 os.makedirs("downloads", exist_ok=True)
 os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
 
@@ -28,6 +27,9 @@ logging.basicConfig(
 console = logging.StreamHandler()
 console.setLevel(logging.INFO)
 logging.getLogger('').addHandler(console)
+
+# Global variable to store Gradio share URL
+SHARE_URL = None
 
 def check_steamcmd():
     """Check if SteamCMD is installed and accessible"""
@@ -50,7 +52,7 @@ def install_steamcmd():
             subprocess.run(f"tar -xf {zip_path} -C {STEAMCMD_DIR}", shell=True, check=True)
             os.remove(zip_path)
         else:
-            # Direct method to ensure proper downloading
+            # Direct method for Linux
             subprocess.run(
                 f"cd {STEAMCMD_DIR} && wget -q https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz && tar -xzf steamcmd_linux.tar.gz && rm steamcmd_linux.tar.gz",
                 shell=True, check=True
@@ -153,14 +155,48 @@ def download_worker(game_id, username, password, anonymous, progress_queue):
         logging.error(f"Download error: {str(e)}")
         progress_queue.put(f"error: {str(e)}")
 
-def generate_public_link(game_id):
-    """Generate public link using Railway's environment variables"""
-    railway_domain = os.getenv("RAILWAY_PUBLIC_DOMAIN")
-    if railway_domain:
-        return f"https://{railway_domain}/downloads/{game_id}"
+def generate_download_path(game_id):
+    """Generate a download path"""
+    global SHARE_URL
+    # If we have a Gradio share URL, we'll display that info
+    if SHARE_URL:
+        return f"Game files downloaded to server. Access at {SHARE_URL}/file/downloads/{game_id}/"
+    return f"Game files downloaded to server directory: /downloads/{game_id}/"
+
+def serve_download_directory(app):
+    """Set up a route to serve the download directory"""
+    @app.routes.get("/file/downloads/{game_id}/{file_path:path}")
+    async def serve_file(game_id: str, file_path: str):
+        from fastapi.responses import FileResponse
+        download_path = os.path.join(os.getcwd(), "downloads", game_id, file_path)
+        if os.path.exists(download_path) and os.path.isfile(download_path):
+            return FileResponse(download_path)
+        return {"error": "File not found"}
     
-    base_url = os.getenv("PUBLIC_URL_BASE", "http://localhost:8080/downloads")
-    return f"{base_url}/{game_id}"
+    @app.routes.get("/file/downloads/{game_id}")
+    async def list_files(game_id: str):
+        from fastapi.responses import HTMLResponse
+        download_path = os.path.join(os.getcwd(), "downloads", game_id)
+        
+        if not os.path.exists(download_path):
+            return HTMLResponse("Directory not found")
+        
+        files = []
+        for root, dirs, filenames in os.walk(download_path):
+            rel_path = os.path.relpath(root, download_path)
+            if rel_path == ".":
+                rel_path = ""
+            for filename in filenames:
+                file_path = os.path.join(rel_path, filename)
+                files.append(file_path)
+        
+        html = "<html><head><title>Files</title></head><body><h1>Downloaded Files</h1><ul>"
+        for file in files:
+            file_url = f"/file/downloads/{game_id}/{file}"
+            html += f"<li><a href='{file_url}'>{file}</a></li>"
+        html += "</ul></body></html>"
+        
+        return HTMLResponse(html)
 
 def create_interface():
     """Create and configure Gradio interface"""
@@ -169,33 +205,37 @@ def create_interface():
         gr.Markdown("## System Status")
         status_text = gr.Textbox(label="SteamCMD Status", interactive=False)
         install_btn = gr.Button("Install SteamCMD", visible=False)
+        share_url_text = gr.Textbox(label="Shared URL", interactive=False)
 
         # Login Section
         gr.Markdown("## Login")
         with gr.Row():
-            username = gr.Textbox(label="Username")
-            password = gr.Textbox(label="Password", type="password")
+            username = gr.Textbox(label="Username", placeholder="Steam username (or leave empty for anonymous)")
+            password = gr.Textbox(label="Password", type="password", placeholder="Steam password")
         anonymous = gr.Checkbox(label="Login Anonymously (for free games)", value=True)
 
         # Download Section
         gr.Markdown("## Game Download")
-        game_input = gr.Textbox(label="Game ID or Steam URL")
+        game_input = gr.Textbox(label="Game ID or Steam URL", placeholder="e.g., 570 or https://store.steampowered.com/app/570/")
         download_btn = gr.Button("Start Download")
 
         # Progress Section
         gr.Markdown("## Download Progress")
         progress_bar = gr.Progress()
         progress_info = gr.Textbox(label="Status", interactive=False)
-        public_link = gr.Textbox(label="Download Link", visible=False)
+        download_path = gr.Textbox(label="Download Location", visible=False, interactive=False)
         error_output = gr.Textbox(label="Error Messages", visible=False)
 
         # System Check on Load
         def system_check():
+            global SHARE_URL
+            share_url_value = f"Gradio Share URL: {SHARE_URL}" if SHARE_URL else "Waiting for Gradio share URL..."
+            
             if check_steamcmd():
-                return gr.update(value="SteamCMD Ready", visible=True), gr.update(visible=False)
-            return gr.update(value="SteamCMD Missing", visible=True), gr.update(visible=True)
+                return gr.update(value="SteamCMD Ready", visible=True), gr.update(visible=False), gr.update(value=share_url_value, visible=True)
+            return gr.update(value="SteamCMD Missing", visible=True), gr.update(visible=True), gr.update(value=share_url_value, visible=True)
         
-        interface.load(system_check, outputs=[status_text, install_btn])
+        interface.load(system_check, outputs=[status_text, install_btn, share_url_text])
 
         # Installation Handler
         def handle_install():
@@ -211,8 +251,11 @@ def create_interface():
                 game_id = extract_game_id(game_input)
                 progress(0, desc="Initializing...")
 
+                if not anonymous and (not username or not password):
+                    raise gr.Error("Username and password required when not using anonymous login")
+                
                 if not anonymous and not validate_credentials(username, password):
-                    raise gr.Error("Invalid credentials")
+                    raise gr.Error("Invalid Steam credentials")
 
                 progress_queue = queue.Queue()
                 thread = threading.Thread(
@@ -237,35 +280,41 @@ def create_interface():
                             progress_info = f"Elapsed: {elapsed} | Remaining: {remaining}"
                             yield {
                                 progress_info: progress_info,
-                                error_output: "",
-                                public_link: ""
+                                error_output: gr.update(value="", visible=False),
+                                download_path: gr.update(visible=False)
                             }
                         elif item.startswith("error:"):
                             raise gr.Error(item[6:])
                         elif item == "complete":
                             yield {
-                                public_link: generate_public_link(game_id),
+                                download_path: gr.update(value=generate_download_path(game_id), visible=True),
                                 progress_info: "Download Complete!",
-                                error_output: ""
+                                error_output: gr.update(value="", visible=False)
                             }
                     except queue.Empty:
                         continue
 
             except Exception as e:
                 yield {
-                    error_output: str(e),
-                    public_link: "",
-                    progress_info: ""
+                    error_output: gr.update(value=str(e), visible=True),
+                    download_path: gr.update(visible=False),
+                    progress_info: "Error occurred."
                 }
 
         download_btn.click(
             handle_download,
             inputs=[username, password, anonymous, game_input],
-            outputs=[progress_info, error_output, public_link],
+            outputs=[progress_info, error_output, download_path],
             show_progress="full"
         )
 
     return interface
+
+def update_share_url(share_url):
+    """Update the global share URL"""
+    global SHARE_URL
+    SHARE_URL = share_url
+    logging.info(f"Gradio share URL: {share_url}")
 
 if __name__ == "__main__":
     # First make sure SteamCMD is installed before starting the web interface
@@ -273,16 +322,25 @@ if __name__ == "__main__":
         install_steamcmd()
     
     app = create_interface()
-    port = int(os.getenv("PORT", 8080))
+    port = int(os.getenv("PORT", 7860))
     logging.info(f"Starting application on port {port}")
     
-    # Configure file serving for downloads
+    # Set up file serving
+    serve_download_directory(app)
+    
+    # Launch with share=True to get a public URL
     app.launch(
         server_port=port, 
-        server_name="0.0.0.0",
-        share=False,
-        root_path="/",
+        server_name="0.0.0.0", 
+        share=True,  # This is the key part - enables Gradio sharing
+        prevent_thread_lock=True,
         show_error=True,
-        favicon_path=None,
-        quiet=False
+        share_callback=update_share_url
     )
+    
+    # Keep the script running
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        logging.info("Application stopped by user")
