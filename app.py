@@ -12,10 +12,13 @@ from platform import system
 STEAMCMD_DIR = os.path.join(os.getcwd(), "steamcmd")
 STEAMCMD_EXE = os.path.join(STEAMCMD_DIR, "steamcmd.exe" if system() == "Windows" else "steamcmd.sh")
 LOG_FILE = "logs/app.log"
-PUBLIC_URL_BASE = os.getenv("PUBLIC_URL_BASE", "http://localhost:7860/downloads")
+PUBLIC_URL_BASE = os.getenv("PUBLIC_URL_BASE", "http://localhost:8080/downloads")
+
+# Ensure download directory exists
+os.makedirs("downloads", exist_ok=True)
+os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
 
 # Set up logging
-os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
 logging.basicConfig(
     filename=LOG_FILE,
     level=logging.INFO,
@@ -90,7 +93,18 @@ def download_worker(game_id, username, password, anonymous, progress_queue):
     """Background worker for handling SteamCMD download process"""
     try:
         login_cmd = ["+login", "anonymous"] if anonymous else ["+login", username, password]
-        cmd = [STEAMCMD_EXE] + login_cmd + ["+app_update", game_id, "validate", "+quit"]
+        download_dir = os.path.join(os.getcwd(), "downloads", game_id)
+        os.makedirs(download_dir, exist_ok=True)
+        
+        cmd = [
+            STEAMCMD_EXE
+        ] + login_cmd + [
+            "+force_install_dir", download_dir,
+            "+app_update", game_id, "validate", 
+            "+quit"
+        ]
+        
+        logging.info(f"Starting download with command: {' '.join(cmd)}")
         
         process = subprocess.Popen(
             cmd,
@@ -106,6 +120,7 @@ def download_worker(game_id, username, password, anonymous, progress_queue):
         downloaded = 0
 
         for line in iter(process.stdout.readline, ''):
+            logging.info(f"SteamCMD: {line.strip()}")
             progress_queue.put(line)
             
             # Parse download progress
@@ -135,11 +150,16 @@ def download_worker(game_id, username, password, anonymous, progress_queue):
             progress_queue.put("complete")
 
     except Exception as e:
+        logging.error(f"Download error: {str(e)}")
         progress_queue.put(f"error: {str(e)}")
 
 def generate_public_link(game_id):
     """Generate public link using Railway's environment variables"""
-    base_url = os.getenv("PUBLIC_URL_BASE", "http://localhost:7860/downloads")
+    railway_domain = os.getenv("RAILWAY_PUBLIC_DOMAIN")
+    if railway_domain:
+        return f"https://{railway_domain}/downloads/{game_id}"
+    
+    base_url = os.getenv("PUBLIC_URL_BASE", "http://localhost:8080/downloads")
     return f"{base_url}/{game_id}"
 
 def create_interface():
@@ -155,7 +175,7 @@ def create_interface():
         with gr.Row():
             username = gr.Textbox(label="Username")
             password = gr.Textbox(label="Password", type="password")
-        anonymous = gr.Checkbox(label="Login Anonymously (for free games)")
+        anonymous = gr.Checkbox(label="Login Anonymously (for free games)", value=True)
 
         # Download Section
         gr.Markdown("## Game Download")
@@ -248,12 +268,21 @@ def create_interface():
     return interface
 
 if __name__ == "__main__":
-    app = create_interface()
-    # Auto-install SteamCMD but don't block startup if it fails
+    # First make sure SteamCMD is installed before starting the web interface
     if not check_steamcmd():
-        logging.info("SteamCMD not found, attempting installation...")
-        threading.Thread(target=install_steamcmd, daemon=True).start()
+        install_steamcmd()
     
-    port = int(os.getenv("PORT", 7860))
+    app = create_interface()
+    port = int(os.getenv("PORT", 8080))
     logging.info(f"Starting application on port {port}")
-    app.launch(server_port=port, server_name="0.0.0.0", share=False)
+    
+    # Configure file serving for downloads
+    app.launch(
+        server_port=port, 
+        server_name="0.0.0.0",
+        share=False,
+        root_path="/",
+        show_error=True,
+        favicon_path=None,
+        quiet=False
+    )
