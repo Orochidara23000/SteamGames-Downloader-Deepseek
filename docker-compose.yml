@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+  steam-downloader:
+    build: .
+    ports:
+      - "7860:7860"
+    volumes:
+      - ./downloads:/app/downloads
+      - ./logs:/app/logs
+    environment:
+      - PUBLIC_URL_BASE=http://localhost:7860/downloads
+    restart: unless-stopped

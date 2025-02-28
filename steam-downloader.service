@@ -1,0 +1,13 @@
+[Unit]
+Description=Steam Game Downloader
+After=network.target
+
+[Service]
+User=steam
+WorkingDirectory=/opt/steam-downloader
+ExecStart=/usr/bin/python3 /opt/steam-downloader/app.py
+Restart=always
+EnvironmentFile=/opt/steam-downloader/.env
+
+[Install]
+WantedBy=multi-user.target
