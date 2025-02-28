@@ -9,6 +9,7 @@ import gradio as gr
 from fastapi import FastAPI
 from fastapi.responses import FileResponse, HTMLResponse
 from platform import system
+import uvicorn  # Import uvicorn for running the FastAPI app
 
 # Configuration
 STEAMCMD_DIR = os.path.join(os.getcwd(), "steamcmd")
@@ -327,7 +328,7 @@ if __name__ == "__main__":
     app = create_interface()
     
     # Serve the FastAPI app in a separate thread
-    threading.Thread(target=lambda: fastapi_app.run(host="0.0.0.0", port=8080), daemon=True).start()
+    threading.Thread(target=lambda: uvicorn.run(fastapi_app, host="0.0.0.0", port=8080), daemon=True).start()
     
     port = int(os.getenv("PORT", 7860))
     logging.info(f"Starting application on port {port}")
@@ -338,8 +339,7 @@ if __name__ == "__main__":
         server_name="0.0.0.0", 
         share=True,  # This enables Gradio sharing
         prevent_thread_lock=True,
-        show_error=True,
-        share_callback=update_share_url
+        show_error=True
     )
     
     # Keep the script running
