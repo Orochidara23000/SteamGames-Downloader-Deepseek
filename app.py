@@ -132,8 +132,9 @@ def download_worker(game_id, username, password, anonymous, progress_queue):
         progress_queue.put(f"error: {str(e)}")
 
 def generate_public_link(game_id):
-    """Generate public link for downloaded content (simplified)"""
-    return f"{PUBLIC_URL_BASE}/{game_id}"
+    """Generate public link using Railway's environment variables"""
+    domain = os.getenv("RAILWAY_PUBLIC_DOMAIN", "http://localhost:7860")
+    return f"{domain}/downloads/{game_id}"
 
 def create_interface():
     """Create and configure Gradio interface"""
@@ -242,4 +243,5 @@ def create_interface():
 
 if __name__ == "__main__":
     app = create_interface()
-    app.launch(server_port=7860, show_error=True)
+    port = int(os.getenv("PORT", 7860))
+    app.launch(server_port=port, server_name="0.0.0.0")

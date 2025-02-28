@@ -1,0 +1,15 @@
+{
+  "build": {
+    "builder": "DOCKERFILE",
+    "dockerfile": "Dockerfile"
+  },
+  "deploy": {
+    "startCommand": "python app.py",
+    "variables": {
+      "PUBLIC_URL_BASE": {
+        "description": "Auto-generated public URL",
+        "value": "https://${RAILWAY_PUBLIC_DOMAIN}/downloads"
+      }
+    }
+  }
+}
