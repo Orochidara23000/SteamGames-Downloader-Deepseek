@@ -1,29 +1,31 @@
-FROM python:3.10-slim
+FROM python:3.9-slim
 
-# Install system dependencies for SteamCMD
+WORKDIR /app
+
+# Install system dependencies (curl, tar, wget for steamcmd installation)
 RUN apt-get update && apt-get install -y \
+    curl \
+    tar \
     wget \
-    ca-certificates \
     lib32gcc-s1 \
+    && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Install SteamCMD
-WORKDIR /steamcmd
-RUN wget -qO- https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz | tar zxvf - \
-    && ./steamcmd.sh +quit
+# Create directories
+RUN mkdir -p /app/downloads /app/logs /app/steamcmd
 
-# Set up application
-WORKDIR /app
-COPY . .
+# Copy application files
+COPY requirements.txt .
+COPY app.py .
 
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Create persistent volume mount point
-RUN mkdir -p /app/downloads
+# Expose the port
+EXPOSE 7860
 
-# Use Railway's port
+# Set environment variables
 ENV PORT=7860
-EXPOSE $PORT
 
+# Command to run the application
 CMD ["python", "app.py"]

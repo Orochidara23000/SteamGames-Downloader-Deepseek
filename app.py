@@ -11,15 +11,20 @@ from platform import system
 # Configuration
 STEAMCMD_DIR = os.path.join(os.getcwd(), "steamcmd")
 STEAMCMD_EXE = os.path.join(STEAMCMD_DIR, "steamcmd.exe" if system() == "Windows" else "steamcmd.sh")
-LOG_FILE = "app.log"
-PUBLIC_URL_BASE = "http://localhost/downloads"  # Replace with your actual public URL
+LOG_FILE = "logs/app.log"
+PUBLIC_URL_BASE = os.getenv("PUBLIC_URL_BASE", "http://localhost:7860/downloads")
 
 # Set up logging
+os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
 logging.basicConfig(
     filename=LOG_FILE,
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s"
 )
+# Also log to console
+console = logging.StreamHandler()
+console.setLevel(logging.INFO)
+logging.getLogger('').addHandler(console)
 
 def check_steamcmd():
     """Check if SteamCMD is installed and accessible"""
@@ -42,8 +47,9 @@ def install_steamcmd():
             subprocess.run(f"tar -xf {zip_path} -C {STEAMCMD_DIR}", shell=True, check=True)
             os.remove(zip_path)
         else:
+            # Direct method to ensure proper downloading
             subprocess.run(
-                f"wget -q -O {STEAMCMD_EXE} https://steamcdn-a.akamaihd.net/client/installer/steamcmd.sh",
+                f"cd {STEAMCMD_DIR} && wget -q https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz && tar -xzf steamcmd_linux.tar.gz && rm steamcmd_linux.tar.gz",
                 shell=True, check=True
             )
             subprocess.run(f"chmod +x {STEAMCMD_EXE}", shell=True, check=True)
@@ -133,8 +139,8 @@ def download_worker(game_id, username, password, anonymous, progress_queue):
 
 def generate_public_link(game_id):
     """Generate public link using Railway's environment variables"""
-    domain = os.getenv("RAILWAY_PUBLIC_DOMAIN", "http://localhost:7860")
-    return f"{domain}/downloads/{game_id}"
+    base_url = os.getenv("PUBLIC_URL_BASE", "http://localhost:7860/downloads")
+    return f"{base_url}/{game_id}"
 
 def create_interface():
     """Create and configure Gradio interface"""
@@ -243,5 +249,11 @@ def create_interface():
 
 if __name__ == "__main__":
     app = create_interface()
+    # Auto-install SteamCMD but don't block startup if it fails
+    if not check_steamcmd():
+        logging.info("SteamCMD not found, attempting installation...")
+        threading.Thread(target=install_steamcmd, daemon=True).start()
+    
     port = int(os.getenv("PORT", 7860))
-    app.launch(server_port=port, server_name="0.0.0.0")
+    logging.info(f"Starting application on port {port}")
+    app.launch(server_port=port, server_name="0.0.0.0", share=False)
