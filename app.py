@@ -6,6 +6,8 @@ import logging
 import threading
 import subprocess
 import gradio as gr
+from fastapi import FastAPI
+from fastapi.responses import FileResponse, HTMLResponse
 from platform import system
 
 # Configuration
@@ -30,6 +32,9 @@ logging.getLogger('').addHandler(console)
 
 # Global variable to store Gradio share URL
 SHARE_URL = None
+
+# Create FastAPI app for serving files
+fastapi_app = FastAPI()
 
 def check_steamcmd():
     """Check if SteamCMD is installed and accessible"""
@@ -163,19 +168,17 @@ def generate_download_path(game_id):
         return f"Game files downloaded to server. Access at {SHARE_URL}/file/downloads/{game_id}/"
     return f"Game files downloaded to server directory: /downloads/{game_id}/"
 
-def serve_download_directory(app):
-    """Set up a route to serve the download directory"""
-    @app.routes.get("/file/downloads/{game_id}/{file_path:path}")
+def serve_download_directory():
+    """Set up routes to serve the download directory"""
+    @fastapi_app.get("/file/downloads/{game_id}/{file_path:path}")
     async def serve_file(game_id: str, file_path: str):
-        from fastapi.responses import FileResponse
         download_path = os.path.join(os.getcwd(), "downloads", game_id, file_path)
         if os.path.exists(download_path) and os.path.isfile(download_path):
             return FileResponse(download_path)
         return {"error": "File not found"}
     
-    @app.routes.get("/file/downloads/{game_id}")
+    @fastapi_app.get("/file/downloads/{game_id}")
     async def list_files(game_id: str):
-        from fastapi.responses import HTMLResponse
         download_path = os.path.join(os.getcwd(), "downloads", game_id)
         
         if not os.path.exists(download_path):
@@ -322,17 +325,18 @@ if __name__ == "__main__":
         install_steamcmd()
     
     app = create_interface()
+    
+    # Serve the FastAPI app in a separate thread
+    threading.Thread(target=lambda: fastapi_app.run(host="0.0.0.0", port=8080), daemon=True).start()
+    
     port = int(os.getenv("PORT", 7860))
     logging.info(f"Starting application on port {port}")
     
-    # Set up file serving
-    serve_download_directory(app)
-    
-    # Launch with share=True to get a public URL
+    # Launch Gradio with share=True to get a public URL
     app.launch(
         server_port=port, 
         server_name="0.0.0.0", 
-        share=True,  # This is the key part - enables Gradio sharing
+        share=True,  # This enables Gradio sharing
         prevent_thread_lock=True,
         show_error=True,
         share_callback=update_share_url
