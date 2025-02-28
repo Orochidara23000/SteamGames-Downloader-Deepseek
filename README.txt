@@ -18,3 +18,4 @@ git clone https://github.com/your-repo/steam-downloader.git
 cd steam-downloader
 pip install -r requirements.txt
 python app.py
+```

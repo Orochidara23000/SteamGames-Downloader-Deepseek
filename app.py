@@ -328,9 +328,9 @@ if __name__ == "__main__":
     app = create_interface()
     
     # Serve the FastAPI app in a separate thread
-    threading.Thread(target=lambda: uvicorn.run(fastapi_app, host="0.0.0.0", port=8080), daemon=True).start()
+    threading.Thread(target=lambda: uvicorn.run(fastapi_app, host="0.0.0.0", port=8081), daemon=True).start()
     
-    port = int(os.getenv("PORT", 7860))
+    port = int(os.getenv("PORT", 7861))
     logging.info(f"Starting application on port {port}")
     
     # Launch Gradio with share=True to get a public URL
